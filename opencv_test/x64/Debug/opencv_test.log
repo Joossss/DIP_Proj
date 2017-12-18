@@ -1,0 +1,5 @@
+﻿  opencv_test.cpp
+c:\opencv\opencv\build\include\opencv2\imgproc.hpp(595): warning C4819: The file contains a character that cannot be represented in the current code page (1257). Save the file in Unicode format to prevent data loss
+c:\opencv\opencv\build\include\opencv2\imgproc.hpp(4028): warning C4819: The file contains a character that cannot be represented in the current code page (1257). Save the file in Unicode format to prevent data loss
+c:\users\loom\desktop\dip\projekt\opencv_test\opencv_test\opencv_test.cpp(63): error C2676: binary '[': 'cv::Mat' does not define this operator or a conversion to a type acceptable to the predefined operator
+c:\users\loom\desktop\dip\projekt\opencv_test\opencv_test\opencv_test.cpp(63): error C2228: left of '.at' must have class/struct/union
