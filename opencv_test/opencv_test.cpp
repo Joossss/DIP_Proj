@@ -20,8 +20,8 @@ struct FINGER {
 void CallBackFunc(int event, int x, int y, int flags, void*userdata);
 Vec3b NewThresholdsLow(Vec3b old_val, Vec3b new_val);
 Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val);
-void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER> new_fingers, int num_fingers);
-//Mat draw_numbers(FINGER * old_fingers, Mat frame, int size);
+void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER> new_fingers);
+void draw_numbers(vector<FINGER> old_fingers, Mat &frame);
 
 Mat frame;
 Point pt;
@@ -77,8 +77,9 @@ int main()
 	params.filterByInertia = false;
 
 	//Fingers
-	vector<FINGER> new_fingers(4);
-	vector<FINGER> old_fingers(4);
+	int num_fingers = 4;
+	vector<FINGER> new_fingers(num_fingers);
+	vector<FINGER> old_fingers(num_fingers);
 
 	//For blurring
 	int blurSize = 5;
@@ -103,24 +104,30 @@ int main()
 		medianBlur(out, out, blurSize);
 
 		/// Detect edges using canny
-		Canny(out, out, 100, 200, 3);
+		//Canny(out, out, 100, 200, 3);
 		/// Find contours
-		findContours(out, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+		findContours(out, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
 
 
 		sort(contours.begin(), contours.end(), [](const vector<Point>& c1, const vector<Point>& c2) {
 			return contourArea(c1, false) < contourArea(c2, false);
 		});
-
-		int num_fingers = 4;
-		num_fingers = MIN(num_fingers, contours.size());
-		/// Draw contours
 		Mat drawing = Mat::zeros(out.size(), CV_8UC3);
 
+		for (int i = 0; i < contours.size(); i++) {
+			drawContours(drawing, contours, i, Scalar(255, 255, 255), 2, 8);
+		}
+		vector<vector<Point>> big_cont;
+		num_fingers = 4;
+		for (int i = 0; i < contours.size(); i++) {
+			if(contourArea(contours[contours.size()-i-1]) > 100)
+				big_cont.push_back(contours[contours.size()-i-1]);
+		}
+		contours = big_cont;
+		num_fingers = MIN(num_fingers, contours.size());
+		/// Draw contours
 		for (int i = 0; i < num_fingers; i++) {
-
-			drawContours(drawing, contours, contours.size()-i-1 , Scalar(255, 255, 255), 2, 8);
-
+			drawContours(drawing, contours, i, Scalar(255,0, 0 ), 2, 8);
 		}
 		
 		
@@ -163,8 +170,8 @@ int main()
 		}
 		if (rclicked) {
 			if (first_R) {
-				for (int i = 0; i < num_fingers; i++) {
-					Moments M = moments(contours[contours.size()-1-i], false);
+				for (int i = 0; i < contours.size(); i++) {
+					Moments M = moments(contours[i], false);
 					Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
 					old_fingers[i].x = P.x;
 					old_fingers[i].y = P.y;
@@ -174,23 +181,22 @@ int main()
 				first_R = 0;
 			}
 			else {
-				for (int i = 0; i < num_fingers; i++) {
-					Moments M = moments(contours[contours.size() - 1 - i], false);
+				for (int i = 0; i < contours.size(); i++) {
+					Moments M = moments(contours[i], false);
 					Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
 					new_fingers[i].x = P.x;
 					new_fingers[i].y = P.y;
 					new_fingers[i].key_pushed = false;
-					FingerMovement(old_fingers, new_fingers, num_fingers);
-					//drawing = draw_numbers(old_fingers, drawing, num_fingers);
-					
 				}
+				FingerMovement(old_fingers, new_fingers);
 			}
+			draw_numbers(old_fingers, drawing);
 		}
 
 		cv::imshow("Stuff and stuff", frame);
 		cv::imshow("threshed", drawing);
 
-		if (waitKey(30) >= 0)
+		if (waitKey(10) >= 0)
 			break;
 	}
 	return 0;
@@ -292,32 +298,35 @@ Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val) {
 	return upper_bound;
 }
 
-void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER>new_fingers, int num_fingers) {
-	for (int i = 0; i < num_fingers; i++) {
+void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER>new_fingers) {
+	for (int i = 0; i < old_fingers.size(); i++) {
 		FINGER holder = new_fingers[0];
-		new_fingers.erase(new_fingers.begin());
-		for (int j = 1; j < new_fingers.size(); j++) {
-			if (abs(new_fingers[i].x) < 1280 && abs(new_fingers[i].y) < 720) {
-				cout << "tramunsus" << endl;
+		int chosen = 0;
+		for (int j = 0; j < new_fingers.size(); j++) {
+			cout << "i: " << i << endl;
+			if (abs(new_fingers[j].x) < 1280 && abs(new_fingers[j].y) < 720) {
 				float dxn = pow((new_fingers[j].x - old_fingers[j].x), 2);
 				float dyn = pow((new_fingers[j].y - old_fingers[j].y), 2);
 				float dxh = pow((holder.x - old_fingers[j].x), 2);
 				float dyh = pow((holder.y - old_fingers[j].y), 2);
 				if ((dxn + dyn) < (dxh + dyh)) {
 					holder = new_fingers[j];
+					chosen = j;
 				}
 			}
 		}
 		old_fingers[i].x = holder.x;
 		old_fingers[i].y = holder.y;
+		new_fingers.erase(new_fingers.begin() + chosen);
 	}
 }
 
-void draw_numbers(vector<FINGER> old_fingers, Mat &frame, int size) {
-	for (int i = 0; i < size; i++) {
+void draw_numbers(vector<FINGER> old_fingers, Mat &frame) {
+	for (int i = 0; i < old_fingers.size(); i++) {
 		putText(frame, to_string(old_fingers[i].ID), cvPoint(old_fingers[i].x, old_fingers[i].y),
 			FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255, 0 ,0), 1, CV_AA);
 		cout << "ID: " << old_fingers[i].ID << ", x: " << old_fingers[i].x << ", y:" << old_fingers[i].y << endl;
+
 	}
 	//return frame;
 }
