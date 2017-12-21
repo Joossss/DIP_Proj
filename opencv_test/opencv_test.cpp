@@ -11,16 +11,17 @@ using namespace std;
 using namespace cv;
 
 struct FINGER {
-	float x;
-	float y;
+	int x;
+	int y;
 	bool key_pushed;
+	int ID;
 };
 
 void CallBackFunc(int event, int x, int y, int flags, void*userdata);
 Vec3b NewThresholdsLow(Vec3b old_val, Vec3b new_val);
 Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val);
-void FingerMovement(FINGER * old_fingers, FINGER * new_fingers, int size);
-Mat draw_numbers(FINGER * old_fingers, Mat frame, int size);
+void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER> new_fingers, int num_fingers);
+//Mat draw_numbers(FINGER * old_fingers, Mat frame, int size);
 
 Mat frame;
 Point pt;
@@ -29,11 +30,15 @@ uchar rclicked = 0, lclicked = 0, first_L = 1, first_R = 1;
 //THRESHOLDING Values
 uint8_t THRESH_HUE = 5;
 uint8_t THRESH_SAT = 5;
-uint8_t THRESH_VAL = 30;
+uint8_t THRESH_VAL = 10;
 
 int main()
 {
 	VideoCapture cap(0);
+	
+	cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
+	cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+
 	//Check if video device has been initialized
 	if (!cap.isOpened())
 		cout << "cannot open camera";
@@ -47,9 +52,7 @@ int main()
 	setMouseCallback("Stuff and stuff", CallBackFunc, NULL);
 
 	cap >> frame;
-	uchar* camData = new uchar[frame.total() * 4];
-	Mat frame_RGBA(frame.size(), CV_8UC4, camData);
-	Mat frame_hsv(frame.size(), CV_8UC3, Scalar(0, 0, 0));
+	cout << frame.size << endl;
 
 	//Thresholding color for first run
 	Vec3b lower_bound = (0, 0, 0);
@@ -60,48 +63,70 @@ int main()
 
 	//Filter by area
 	params.filterByArea = true;
-	params.minArea = 70;
+	params.minArea = 1000;
+	params.maxArea = 6000;
 
 	//Filter by color
 	params.filterByColor = true;
 	params.blobColor = 255;
 
 	//Not filtering by
-	params.filterByArea = false;
+
 	params.filterByCircularity = false;
 	params.filterByConvexity = false;
 	params.filterByInertia = false;
 
 	//Fingers
-	FINGER new_fingers[5];
-	FINGER old_fingers[5];
+	vector<FINGER> new_fingers(4);
+	vector<FINGER> old_fingers(4);
+
+	//For blurring
+	int blurSize = 5;
+
+	RNG rng(12345);
 
 	while (1)
-	{	
+	{
 		cap >> frame;
-		GaussianBlur(frame, frame, Size(11,11), 0);
-		cvtColor(frame, frame_RGBA, CV_BGR2RGBA);
-		cvtColor(frame_RGBA, frame_hsv, CV_RGBA2RGB);
-		cvtColor(frame_RGBA, frame_hsv, CV_RGB2HSV);
-		Mat frame_black(frame.size(), CV_8UC3, Scalar(0, 0, 0));
+		cvtColor(frame, frame, CV_BGR2RGBA);
+		cvtColor(frame, frame, CV_RGBA2RGB);
+		cvtColor(frame, frame, CV_RGB2HSV);
+
 		Mat out;
 
-		inRange(frame_hsv, lower_bound, upper_bound, out);
+		inRange(frame, lower_bound, upper_bound, out);
 
-		//Detect blobs.
-		vector<KeyPoint> keypoints;
-		Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
-		detector->detect(out, keypoints);
 
-		//Draw detected blobs as red circles
-		//DrawMatchFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the
-		//corresponds to the size of the blob
-		Mat out_with_keypoints;
-		drawKeypoints(out, keypoints, out_with_keypoints, Scalar(0, 0, 255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+		vector<vector<Point> > contours;
+		vector<Vec4i> hierarchy;
 
+		medianBlur(out, out, blurSize);
+
+		/// Detect edges using canny
+		Canny(out, out, 100, 200, 3);
+		/// Find contours
+		findContours(out, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+
+
+		sort(contours.begin(), contours.end(), [](const vector<Point>& c1, const vector<Point>& c2) {
+			return contourArea(c1, false) < contourArea(c2, false);
+		});
+
+		int num_fingers = 4;
+		num_fingers = MIN(num_fingers, contours.size());
+		/// Draw contours
+		Mat drawing = Mat::zeros(out.size(), CV_8UC3);
+
+		for (int i = 0; i < num_fingers; i++) {
+
+			drawContours(drawing, contours, contours.size()-i-1 , Scalar(255, 255, 255), 2, 8);
+
+		}
+		
+		
 		//Mouseclick routine
 		if (lclicked) {
-			Vec3b new_color = frame_hsv.at<Vec3b>(pt.y, pt.x);
+			Vec3b new_color = frame.at<Vec3b>(pt.y, pt.x);
 			cout << new_color << endl;
 
 			//If it's the first mouseclick of the session
@@ -110,19 +135,19 @@ int main()
 				lower_bound[1] = uint8_t(abs(new_color[1] - THRESH_SAT));
 				lower_bound[2] = uint8_t(abs(new_color[2] - THRESH_VAL));
 				if (new_color[0] + THRESH_HUE < 180) {
-					upper_bound[0] = new_color[0] + THRESH_HUE;
+					upper_bound[0] = uint8_t(new_color[0] + THRESH_HUE);
 				}
 				else {
 					upper_bound[0] = 179;
 				}
 				if (new_color[1] + THRESH_SAT < 256) {
-					upper_bound[1] = new_color[1] + THRESH_SAT;
+					upper_bound[1] = uint8_t(new_color[1] + THRESH_SAT);
 				}
 				else {
 					upper_bound[1] = 255;
 				}
 				if (new_color[2] + THRESH_VAL < 256) {
-					upper_bound[2] = new_color[2] + THRESH_VAL;
+					upper_bound[2] = uint8_t(new_color[2] + THRESH_VAL);
 				}
 				else {
 					upper_bound[2] = 255;
@@ -138,28 +163,32 @@ int main()
 		}
 		if (rclicked) {
 			if (first_R) {
-				for (int i = 0; i < keypoints.size(); i++) {
-					old_fingers[i].x = keypoints[i].pt.x;
-					old_fingers[i].y = keypoints[i].pt.y;
+				for (int i = 0; i < num_fingers; i++) {
+					Moments M = moments(contours[contours.size()-1-i], false);
+					Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
+					old_fingers[i].x = P.x;
+					old_fingers[i].y = P.y;
 					old_fingers[i].key_pushed = false;
+					old_fingers[i].ID = i;
 				}
 				first_R = 0;
 			}
 			else {
-				for (int i = 0; i < keypoints.size(); i++) {
-					new_fingers[i].x = keypoints[i].pt.x;
-					new_fingers[i].y = keypoints[i].pt.y;
+				for (int i = 0; i < num_fingers; i++) {
+					Moments M = moments(contours[contours.size() - 1 - i], false);
+					Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
+					new_fingers[i].x = P.x;
+					new_fingers[i].y = P.y;
 					new_fingers[i].key_pushed = false;
-					FingerMovement(old_fingers, new_fingers, 5);
-					out_with_keypoints = draw_numbers(old_fingers, out_with_keypoints, 5);
+					FingerMovement(old_fingers, new_fingers, num_fingers);
+					//drawing = draw_numbers(old_fingers, drawing, num_fingers);
 					
 				}
 			}
 		}
 
-		//hconcat(frame, out, conc);
-		imshow("Stuff and stuff", frame);
-		imshow("threshed", out_with_keypoints);
+		cv::imshow("Stuff and stuff", frame);
+		cv::imshow("threshed", drawing);
 
 		if (waitKey(30) >= 0)
 			break;
@@ -251,7 +280,7 @@ Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val) {
 	}
 	if (new_val[2] > (old_val[2] - THRESH_VAL)) {
 		if ((new_val[2] + THRESH_VAL) < 256) {
-			upper_bound[0] = uint8_t(new_val[2] + THRESH_VAL);
+			upper_bound[2] = uint8_t(new_val[2] + THRESH_VAL);
 		}
 		else {
 			upper_bound[2] = 255;
@@ -263,35 +292,34 @@ Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val) {
 	return upper_bound;
 }
 
-void FingerMovement(FINGER * old_fingers, FINGER * new_fingers, int size) {
-	for (int i = 0; i < size; i++) {
-		FINGER holder;
-		for (int j = 0; j < size; j++) {
-			if (j == 0)
-				holder = *new_fingers;
-			else {
-				int dxn = pow((new_fingers->x - old_fingers->x),2);
-				int dyn = pow((new_fingers->y - old_fingers->y),2);
-				int dxh = pow((holder.x - old_fingers->x), 2);
-				int dyh = pow((holder.y - old_fingers->y), 2);
-				if ((dxn + dyn) < (dxh - dyh))
-					holder = *new_fingers;
+void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER>new_fingers, int num_fingers) {
+	for (int i = 0; i < num_fingers; i++) {
+		FINGER holder = new_fingers[0];
+		new_fingers.erase(new_fingers.begin());
+		for (int j = 1; j < new_fingers.size(); j++) {
+			if (abs(new_fingers[i].x) < 1280 && abs(new_fingers[i].y) < 720) {
+				cout << "tramunsus" << endl;
+				float dxn = pow((new_fingers[j].x - old_fingers[j].x), 2);
+				float dyn = pow((new_fingers[j].y - old_fingers[j].y), 2);
+				float dxh = pow((holder.x - old_fingers[j].x), 2);
+				float dyh = pow((holder.y - old_fingers[j].y), 2);
+				if ((dxn + dyn) < (dxh + dyh)) {
+					holder = new_fingers[j];
+				}
 			}
-			*old_fingers = holder;
-			new_fingers++;
 		}
-		old_fingers++;
+		old_fingers[i].x = holder.x;
+		old_fingers[i].y = holder.y;
 	}
-	return;
 }
 
-Mat draw_numbers(FINGER * old_fingers, Mat frame, int size) {
+void draw_numbers(vector<FINGER> old_fingers, Mat &frame, int size) {
 	for (int i = 0; i < size; i++) {
-		putText(frame, to_string(i), cvPoint(old_fingers->x, old_fingers->y),
+		putText(frame, to_string(old_fingers[i].ID), cvPoint(old_fingers[i].x, old_fingers[i].y),
 			FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255, 0 ,0), 1, CV_AA);
-		old_fingers++;
+		cout << "ID: " << old_fingers[i].ID << ", x: " << old_fingers[i].x << ", y:" << old_fingers[i].y << endl;
 	}
-	return frame;
+	//return frame;
 }
 
 
