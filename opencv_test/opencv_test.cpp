@@ -4,9 +4,9 @@
 #include "stdafx.h"
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
-
 #include <cmath>
 #include <iostream>
+
 using namespace std;
 using namespace cv;
 
@@ -15,24 +15,26 @@ struct FINGER {
 	int y;
 	bool key_pushed;
 	int ID;
+	int area;
+	vector<int> area_extremes;
 };
 
 void CallBackFunc(int event, int x, int y, int flags, void*userdata);
 Vec3b NewThresholdsLow(Vec3b old_val, Vec3b new_val);
 Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val);
 void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER> new_fingers);
-void draw_numbers(vector<FINGER> old_fingers, Mat &frame);
+void draw_numbers(vector<FINGER> &old_fingers, Mat &frame, int num_fingers);
 void draw_biggest(vector<vector<Point>> &contours, int &num_fingers, Mat &out);
 void find_sort_contours(Mat &out, vector<vector<Point>> &contours);
 void first_lclick(Vec3b &lower_bound, Vec3b &upper_bound, Vec3b new_color);
 void left_mouse(Vec3b &lower_bound, Vec3b &upper_bound);
 void first_rclick(int num_fingers, vector<vector<Point>> contours, vector<FINGER> &old_fingers);
 void right_mouse(int num_fingers, vector<vector<Point>> contours, vector<FINGER> &old_fingers, vector<FINGER> &new_fingers, Mat &out);
-
+void check_if_pushed(int num_fingers, vector<FINGER> &old_fingers);
 
 Mat frame;
 Point pt;
-uchar rclicked = 0, lclicked = 0, first_L = 1, first_R = 1;
+uchar rclicked = 0, lclicked = 0, first_L = 1, first_R = 1, mmove = 0, check_state = 0;
 
 //THRESHOLDING Values
 uint8_t THRESH_HUE = 5;
@@ -75,7 +77,6 @@ int main()
 
 	while (1)
 	{
-
 		//Variables
 		Mat out;
 		vector<vector<Point> > contours;
@@ -86,12 +87,10 @@ int main()
 		cvtColor(frame, frame, CV_RGBA2RGB);
 		cvtColor(frame, frame, CV_RGB2HSV);
 
-		
 		//Thresholding and blurring
 		inRange(frame, lower_bound, upper_bound, out);
 		medianBlur(out, out, blurSize);
 
-		 
 		/// Find contours and draw 
 		find_sort_contours(out, contours);
 		draw_biggest(contours, num_fingers, out);
@@ -100,7 +99,6 @@ int main()
 		/*for (int i = 0; i < contours.size(); i++) {
 			drawContours(out, contours, i, Scalar(255, 255, 255), 2, 8);
 		}*/
-		
 		
 		//Mouseclick routines
 		left_mouse(lower_bound, upper_bound);
@@ -119,13 +117,11 @@ int main()
 void CallBackFunc(int event, int x, int y, int flags, void*userdata) {
 	pt = Point(x, y);
 	switch(event) {
-		case EVENT_LBUTTONDOWN: cout << "Lb clicked - pos (" << pt.x << " , " << pt.y << ")" << endl;
-			lclicked = 1;
+		case EVENT_LBUTTONDOWN:	lclicked = 1;
 			break;
-		case EVENT_RBUTTONDOWN: cout << "Rb clicked - pos (" << pt.x << " , " << pt.y << ")" << endl;
-			rclicked = 1;
+		case EVENT_RBUTTONDOWN:	rclicked = 1;
 			break;
-		//case EVENT_MOUSEMOVE: cout << "Mouse move over the window - pos (" << pt.x << " , " << pt.y << ")" << endl;
+		case EVENT_MOUSEMOVE: mmove = 1;
 			break;
 	}
 
@@ -215,14 +211,16 @@ Vec3b NewThresholdsUp(Vec3b old_val, Vec3b new_val) {
 void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER>new_fingers) {
 	for (int i = 0; i < old_fingers.size(); i++) {
 		FINGER holder = new_fingers[0];
+		float distance = pow((holder.x - old_fingers[i].x), 2) + pow((holder.y - old_fingers[i].y), 2);
 		int chosen = 0;
 		for (int j = 0; j < new_fingers.size(); j++) {
 			if (abs(new_fingers[j].x) < 1280 && abs(new_fingers[j].y) < 720) {
-				float dxn = pow((new_fingers[j].x - old_fingers[j].x), 2);
-				float dyn = pow((new_fingers[j].y - old_fingers[j].y), 2);
-				float dxh = pow((holder.x - old_fingers[j].x), 2);
-				float dyh = pow((holder.y - old_fingers[j].y), 2);
+				float dxn = pow((new_fingers[j].x - old_fingers[i].x), 2);
+				float dyn = pow((new_fingers[j].y - old_fingers[i].y), 2);
+				float dxh = pow((holder.x - old_fingers[i].x), 2);
+				float dyh = pow((holder.y - old_fingers[i].y), 2);
 				if ((dxn + dyn) < (dxh + dyh)) {
+					distance = dxn + dyn;
 					holder = new_fingers[j];
 					chosen = j;
 				}
@@ -230,27 +228,33 @@ void FingerMovement(vector<FINGER> &old_fingers, vector<FINGER>new_fingers) {
 		}
 		old_fingers[i].x = holder.x;
 		old_fingers[i].y = holder.y;
+		old_fingers[i].area = holder.area;
 		new_fingers.erase(new_fingers.begin() + chosen);
 	}
 }
 
 //Draw id numbers for each contour
-void draw_numbers(vector<FINGER> old_fingers, Mat &frame) {
+void draw_numbers(vector<FINGER> &old_fingers, Mat &frame, int num_fingers) {
+	check_if_pushed(num_fingers, old_fingers);
 	for (int i = 0; i < old_fingers.size(); i++) {
+		Scalar color = Scalar(0, 255, 0);
+		if (old_fingers[i].key_pushed == false) {
+			color = Scalar(0, 0, 255);
+		}
 		putText(frame, to_string(old_fingers[i].ID), cvPoint(old_fingers[i].x, old_fingers[i].y),
-			FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255, 0 ,0), 1, CV_AA);
+			FONT_HERSHEY_COMPLEX_SMALL, 0.8, color, 1, CV_AA);
 
 	}
 	//return frame;
 }
 
-//Draw the biggest contours
+//Draw the biggest contours and make contours contain only them
 void draw_biggest(vector<vector<Point>> &contours, int &num_fingers, Mat &out){
 	out = Mat::zeros(out.size(), CV_8UC3);
 	num_fingers = 4;
 	vector<vector<Point>> big_cont;
 	for (int i = 0; i < contours.size(); i++) {
-		if (contourArea(contours[contours.size() - i - 1]) > 100)
+		if (contourArea(contours[contours.size() - i - 1]) > 200)
 			big_cont.push_back(contours[contours.size() - i - 1]);
 	}
 	contours = big_cont;
@@ -321,28 +325,50 @@ void first_rclick(int num_fingers, vector<vector<Point>> contours, vector<FINGER
 		old_fingers[i].y = P.y;
 		old_fingers[i].key_pushed = false;
 		old_fingers[i].ID = i;
+		old_fingers[i].area = contourArea(contours[i]);
 	}
 	first_R = 0;
 }
 
 //Right mouse - this will run everytime after first click
 void right_mouse(int num_fingers, vector<vector<Point>> contours, vector<FINGER> &old_fingers, vector<FINGER> &new_fingers, Mat &out) {
+	if (rclicked && first_R) {
+		first_rclick(num_fingers, contours, old_fingers);
+		}
+	else {
+		for (int i = 0; i < num_fingers; i++) {
+			Moments M = moments(contours[i], false);
+			Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
+			new_fingers[i].x = P.x;
+			new_fingers[i].y = P.y;
+			new_fingers[i].key_pushed = false;
+			new_fingers[i].area = contourArea(contours[i]);
+		}
+		FingerMovement(old_fingers, new_fingers);
+	}
+	draw_numbers(old_fingers, out, num_fingers);
 	if (rclicked) {
-		if (first_R) {
-			first_rclick(num_fingers, contours, old_fingers);
+		for (int i = 0; i < num_fingers; i++) {
+			old_fingers[i].area_extremes.push_back(old_fingers[i].area);
+			cout << "The last element currently is: " << old_fingers[i].area_extremes.back() << endl;
 		}
-		else {
-			for (int i = 0; i < num_fingers; i++) {
-				Moments M = moments(contours[i], false);
-				Point P = Point(round(M.m10 / M.m00), round(M.m01 / M.m00));
-				new_fingers[i].x = P.x;
-				new_fingers[i].y = P.y;
-				new_fingers[i].key_pushed = false;
-			}
-			FingerMovement(old_fingers, new_fingers);
-		}
-		draw_numbers(old_fingers, out);
+		if (old_fingers[0].area_extremes.size() == 2)
+			check_state = 1;
+		rclicked = 0;
 	}
 }
+
+//Check if fingers have move to a pushing position
+void check_if_pushed(int num_fingers, vector<FINGER> &old_fingers) {
+	if (check_state) {
+		for (int i = 0; i < num_fingers; i++) {
+			if (abs(old_fingers[i].area - old_fingers[i].area_extremes[0]) <= abs(old_fingers[i].area - old_fingers[i].area_extremes[1]))
+				old_fingers[i].key_pushed = false;
+			else
+				old_fingers[i].key_pushed = true;
+		}
+	}
+}
+	
 
 
